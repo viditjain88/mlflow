@@ -216,7 +216,7 @@ async def test_validate_git_location_rejects_unsafe_urls(url):
 
 @pytest.mark.asyncio
 async def test_validate_git_location_rejects_domain_resolving_to_localhost(monkeypatch):
-    def mock_getaddrinfo(host, port, family, socktype):
+    def mock_getaddrinfo(*args, **kwargs):
         # Simulate a domain resolving to localhost
         return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 443))]
 
@@ -228,7 +228,7 @@ async def test_validate_git_location_rejects_domain_resolving_to_localhost(monke
 
 @pytest.mark.asyncio
 async def test_validate_git_location_rejects_domain_resolving_to_private_ip(monkeypatch):
-    def mock_getaddrinfo(host, port, family, socktype):
+    def mock_getaddrinfo(*args, **kwargs):
         # Simulate a domain resolving to a private IP
         return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("192.168.1.100", 443))]
 
@@ -240,7 +240,7 @@ async def test_validate_git_location_rejects_domain_resolving_to_private_ip(monk
 
 @pytest.mark.asyncio
 async def test_validate_git_location_rejects_dns_failure(monkeypatch):
-    def mock_getaddrinfo(host, port, family, socktype):
+    def mock_getaddrinfo(*args, **kwargs):
         raise socket.gaierror("Name or service not known")
 
     monkeypatch.setattr(socket, "getaddrinfo", mock_getaddrinfo)
@@ -253,7 +253,7 @@ async def test_validate_git_location_rejects_dns_failure(monkeypatch):
 async def test_validate_git_location_accepts_valid_public_url(monkeypatch):
     import aiohttp
 
-    def mock_getaddrinfo(host, port, family, socktype):
+    def mock_getaddrinfo(*args, **kwargs):
         # Simulate resolving to a public IP (GitHub's IP range)
         return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("140.82.113.4", 443))]
 
@@ -270,7 +270,7 @@ async def test_validate_git_location_accepts_valid_public_url(monkeypatch):
             pass
 
     class MockSession:
-        def head(self, url, allow_redirects=True, timeout=10):
+        def head(self, *args, **kwargs):
             return MockResponse()
 
         async def __aenter__(self):
@@ -289,7 +289,7 @@ async def test_validate_git_location_accepts_valid_public_url(monkeypatch):
 async def test_validate_git_location_rejects_on_http_error(monkeypatch):
     import aiohttp
 
-    def mock_getaddrinfo(host, port, family, socktype):
+    def mock_getaddrinfo(*args, **kwargs):
         return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("140.82.113.4", 443))]
 
     monkeypatch.setattr(socket, "getaddrinfo", mock_getaddrinfo)
@@ -305,7 +305,7 @@ async def test_validate_git_location_rejects_on_http_error(monkeypatch):
             pass
 
     class MockSession:
-        def head(self, url, allow_redirects=True, timeout=10):
+        def head(self, *args, **kwargs):
             return MockResponse()
 
         async def __aenter__(self):

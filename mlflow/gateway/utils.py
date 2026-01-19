@@ -289,7 +289,7 @@ async def validate_git_location(url: str) -> bool:
         # It's a hostname, need to resolve it to check for private IPs
         try:
             # Run blocking DNS resolution in executor to keep it async
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             addr_info = await loop.run_in_executor(
                 None, socket.getaddrinfo, hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM
             )
