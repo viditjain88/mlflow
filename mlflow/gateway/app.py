@@ -383,6 +383,12 @@ def create_app_from_config(
                 "name or update the existing endpoint.",
             )
 
+        if not endpoint.model.name:
+            raise HTTPException(
+                status_code=400,
+                detail="The model name must be provided.",
+            )
+
         if endpoint.model.git_location:
             if not await validate_git_location(endpoint.model.git_location):
                 raise HTTPException(
@@ -390,12 +396,6 @@ def create_app_from_config(
                     detail=f"The git location '{endpoint.model.git_location}' is not a valid URL "
                     "or is not accessible.",
                 )
-
-        if not endpoint.model.name:
-            raise HTTPException(
-                status_code=400,
-                detail="The model name must be provided.",
-            )
 
         app.dynamic_endpoints[endpoint.name] = endpoint
         app.add_api_route(
