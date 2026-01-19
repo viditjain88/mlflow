@@ -275,6 +275,247 @@ def test_dynamic_route():
             mock_post.reset_mock()
 
 
+def test_create_endpoint_success(tmp_path):
+    config_path = tmp_path / "config.yaml"
+    config = GatewayConfig(
+        **{
+            "endpoints": [
+                {
+                    "name": "existing-endpoint",
+                    "endpoint_type": "llm/v1/chat",
+                    "model": {
+                        "name": "gpt-4",
+                        "provider": "openai",
+                        "config": {
+                            "openai_api_key": "test_key",
+                        },
+                    },
+                }
+            ],
+        }
+    )
+    config_path.write_text(config.model_dump_json())
+    app = create_app_from_config(config, config_path=str(config_path))
+    client = TestClient(app)
+
+    new_endpoint = {
+        "name": "new-test-endpoint",
+        "endpoint_type": "llm/v1/completions",
+        "model": {
+            "name": "gpt-3.5-turbo",
+            "provider": "openai",
+            "config": {
+                "openai_api_key": "test_key_2",
+            },
+        },
+    }
+
+    response = client.post("/api/2.0/endpoints/", json=new_endpoint)
+    assert response.status_code == 200
+    result = response.json()
+    assert result["name"] == "new-test-endpoint"
+    assert result["endpoint_type"] == "llm/v1/completions"
+    assert result["model"]["name"] == "gpt-3.5-turbo"
+    assert result["model"]["provider"] == "openai"
+
+    # Verify the endpoint can be retrieved
+    get_response = client.get("/api/2.0/endpoints/new-test-endpoint")
+    assert get_response.status_code == 200
+    assert get_response.json()["name"] == "new-test-endpoint"
+
+
+def test_create_endpoint_duplicate_name():
+    config = GatewayConfig(
+        **{
+            "endpoints": [
+                {
+                    "name": "duplicate-endpoint",
+                    "endpoint_type": "llm/v1/chat",
+                    "model": {
+                        "name": "gpt-4",
+                        "provider": "openai",
+                        "config": {
+                            "openai_api_key": "test_key",
+                        },
+                    },
+                }
+            ],
+        }
+    )
+    app = create_app_from_config(config)
+    client = TestClient(app)
+
+    duplicate_endpoint = {
+        "name": "duplicate-endpoint",
+        "endpoint_type": "llm/v1/completions",
+        "model": {
+            "name": "gpt-3.5-turbo",
+            "provider": "openai",
+            "config": {
+                "openai_api_key": "test_key_2",
+            },
+        },
+    }
+
+    response = client.post("/api/2.0/endpoints/", json=duplicate_endpoint)
+    assert response.status_code == 400
+    assert "already exists" in response.json()["detail"]
+
+
+def test_create_endpoint_invalid_git_location():
+    config = GatewayConfig(**{"endpoints": []})
+    app = create_app_from_config(config)
+    client = TestClient(app)
+
+    async def mock_validate_git_location(url):
+        return False
+
+    with mock.patch(
+        "mlflow.gateway.app.validate_git_location", side_effect=mock_validate_git_location
+    ) as mock_validate:
+        endpoint_with_invalid_git = {
+            "name": "test-endpoint",
+            "endpoint_type": "llm/v1/completions",
+            "model": {
+                "name": "my-model",
+                "provider": "openai",
+                "git_location": "https://invalid-git-url.com/model",
+                "config": {
+                    "openai_api_key": "test_key",
+                },
+            },
+        }
+
+        response = client.post("/api/2.0/endpoints/", json=endpoint_with_invalid_git)
+        assert response.status_code == 400
+        assert (
+            "not a valid URL" in response.json()["detail"]
+            or "not accessible" in response.json()["detail"]
+        )
+        mock_validate.assert_called_once()
+
+
+def test_create_endpoint_valid_git_location():
+    config = GatewayConfig(**{"endpoints": []})
+    app = create_app_from_config(config)
+    client = TestClient(app)
+
+    async def mock_validate_git_location(url):
+        return True
+
+    with mock.patch(
+        "mlflow.gateway.app.validate_git_location", side_effect=mock_validate_git_location
+    ):
+        endpoint_with_valid_git = {
+            "name": "test-endpoint",
+            "endpoint_type": "llm/v1/completions",
+            "model": {
+                "name": "my-model",
+                "provider": "openai",
+                "git_location": "https://github.com/user/repo/model",
+                "config": {
+                    "openai_api_key": "test_key",
+                },
+            },
+        }
+
+        response = client.post("/api/2.0/endpoints/", json=endpoint_with_valid_git)
+        assert response.status_code == 200
+        assert response.json()["name"] == "test-endpoint"
+
+
+def test_create_endpoint_missing_model_name():
+    config = GatewayConfig(**{"endpoints": []})
+    app = create_app_from_config(config)
+    client = TestClient(app)
+
+    endpoint_without_name = {
+        "name": "test-endpoint",
+        "endpoint_type": "llm/v1/completions",
+        "model": {
+            "provider": "openai",
+            "config": {
+                "openai_api_key": "test_key",
+            },
+        },
+    }
+
+    response = client.post("/api/2.0/endpoints/", json=endpoint_without_name)
+    assert response.status_code == 400
+    assert "model name must be provided" in response.json()["detail"]
+
+
+def test_create_endpoint_config_persistence(tmp_path):
+    config_path = tmp_path / "config.yaml"
+    config = GatewayConfig(
+        **{
+            "endpoints": [
+                {
+                    "name": "existing-endpoint",
+                    "endpoint_type": "llm/v1/chat",
+                    "model": {
+                        "name": "gpt-4",
+                        "provider": "openai",
+                        "config": {
+                            "openai_api_key": "test_key",
+                        },
+                    },
+                }
+            ],
+        }
+    )
+    config_path.write_text(config.model_dump_json())
+    app = create_app_from_config(config, config_path=str(config_path))
+    client = TestClient(app)
+
+    new_endpoint = {
+        "name": "persisted-endpoint",
+        "endpoint_type": "llm/v1/completions",
+        "model": {
+            "name": "gpt-3.5-turbo",
+            "provider": "openai",
+            "config": {
+                "openai_api_key": "test_key_2",
+            },
+        },
+    }
+
+    response = client.post("/api/2.0/endpoints/", json=new_endpoint)
+    assert response.status_code == 200
+
+    # Verify config file was updated
+    import yaml
+
+    with open(config_path) as f:
+        saved_config = yaml.safe_load(f)
+
+    endpoint_names = [ep["name"] for ep in saved_config["endpoints"]]
+    assert "existing-endpoint" in endpoint_names
+    assert "persisted-endpoint" in endpoint_names
+
+
+def test_create_endpoint_without_config_path():
+    config = GatewayConfig(**{"endpoints": []})
+    app = create_app_from_config(config)  # No config_path provided
+    client = TestClient(app)
+
+    new_endpoint = {
+        "name": "temp-endpoint",
+        "endpoint_type": "llm/v1/completions",
+        "model": {
+            "name": "gpt-3.5-turbo",
+            "provider": "openai",
+            "config": {
+                "openai_api_key": "test_key",
+            },
+        },
+    }
+
+    response = client.post("/api/2.0/endpoints/", json=new_endpoint)
+    assert response.status_code == 200
+    assert response.json()["name"] == "temp-endpoint"
+
+
 def test_create_app_from_env_fails_if_MLFLOW_GATEWAY_CONFIG_is_not_set(monkeypatch):
     monkeypatch.delenv("MLFLOW_GATEWAY_CONFIG", raising=False)
     with pytest.raises(MlflowException, match="'MLFLOW_GATEWAY_CONFIG' is not set"):
