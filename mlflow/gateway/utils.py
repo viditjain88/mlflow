@@ -263,6 +263,25 @@ def is_valid_ai21labs_model(model_name: str) -> bool:
 
 
 async def validate_git_location(url: str) -> bool:
+    """
+    Validate that a Git location URL is accessible.
+
+    Sends an HTTP HEAD request to the URL to verify accessibility without downloading
+    the full content. This is used to validate URLs before attempting to download
+    model artifacts or configuration files.
+
+    Args:
+        url: The URL to validate (e.g., "https://github.com/user/repo/raw/main/model.pkl")
+
+    Returns:
+        True if the URL responds with HTTP 200 status, False otherwise.
+
+    Behavior:
+        - Sends HTTP HEAD request (does not download content)
+        - Follows HTTP redirects automatically
+        - Times out after 10 seconds
+        - Returns False for any errors (network issues, invalid URLs, timeouts, etc.)
+    """
     import aiohttp
     import ipaddress
     import socket
