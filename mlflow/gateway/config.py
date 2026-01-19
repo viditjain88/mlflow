@@ -330,11 +330,11 @@ class Model(ConfigModel):
     def validate_git_location_format(cls, value):
         if value is None:
             return value
-        # Validate that git_location is a well-formed URL
+        # Validate that git_location is a well-formed HTTP/HTTPS URL
         try:
             # Use pydantic's HttpUrl to validate URL format
             HttpUrl(value)
-        except Exception:
+        except (ValidationError, ValueError, TypeError):
             raise MlflowException.invalid_parameter_value(
                 f"The git_location '{value}' is not a valid URL. "
                 "Please provide a valid HTTP or HTTPS URL."
