@@ -415,7 +415,7 @@ def test_create_endpoint_missing_model_name(client_for_endpoint_creation: TestCl
     )
 
     assert response.status_code == 400
-    assert "model name must be provided" in response.json()["detail"]
+    assert "The model name must be provided" in response.json()["detail"]
 
 
 def test_create_endpoint_config_persistence(tmp_path):
