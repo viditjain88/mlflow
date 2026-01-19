@@ -1,3 +1,5 @@
+import socket
+
 import pytest
 from fastapi import HTTPException
 
@@ -13,6 +15,7 @@ from mlflow.gateway.utils import (
     resolve_route_url,
     set_gateway_uri,
     translate_http_exception,
+    validate_git_location,
 )
 from mlflow.protos.databricks_pb2 import INVALID_PARAMETER_VALUE
 
@@ -188,3 +191,130 @@ async def test_translate_http_exception_passes_through_other_exceptions():
 
     with pytest.raises(ValueError, match="Some value error"):
         await raise_value_error()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://github.com/repo/model",  # http instead of https
+        "ftp://github.com/repo/model",  # ftp protocol
+        "https://localhost/repo/model",  # localhost
+        "https://127.0.0.1/repo/model",  # loopback IP
+        "https://0.0.0.0/repo/model",  # all zeros
+        "https://::1/repo/model",  # IPv6 loopback
+        "https://10.0.0.1/repo/model",  # private IP (10.0.0.0/8)
+        "https://172.16.0.1/repo/model",  # private IP (172.16.0.0/12)
+        "https://192.168.1.1/repo/model",  # private IP (192.168.0.0/16)
+        "https://169.254.1.1/repo/model",  # link-local IP
+        "https://",  # missing hostname
+    ],
+)
+async def test_validate_git_location_rejects_unsafe_urls(url):
+    assert await validate_git_location(url) is False
+
+
+@pytest.mark.asyncio
+async def test_validate_git_location_rejects_domain_resolving_to_localhost(monkeypatch):
+    def mock_getaddrinfo(*args, **kwargs):
+        # Simulate a domain resolving to localhost
+        return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 443))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", mock_getaddrinfo)
+
+    # Should reject because the domain resolves to localhost
+    assert await validate_git_location("https://evil.com/repo/model") is False
+
+
+@pytest.mark.asyncio
+async def test_validate_git_location_rejects_domain_resolving_to_private_ip(monkeypatch):
+    def mock_getaddrinfo(*args, **kwargs):
+        # Simulate a domain resolving to a private IP
+        return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("192.168.1.100", 443))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", mock_getaddrinfo)
+
+    # Should reject because the domain resolves to a private IP
+    assert await validate_git_location("https://evil.com/repo/model") is False
+
+
+@pytest.mark.asyncio
+async def test_validate_git_location_rejects_dns_failure(monkeypatch):
+    def mock_getaddrinfo(*args, **kwargs):
+        raise socket.gaierror("Name or service not known")
+
+    monkeypatch.setattr(socket, "getaddrinfo", mock_getaddrinfo)
+
+    # Should reject if DNS resolution fails
+    assert await validate_git_location("https://nonexistent.invalid/repo/model") is False
+
+
+@pytest.mark.asyncio
+async def test_validate_git_location_accepts_valid_public_url(monkeypatch):
+    import aiohttp
+
+    def mock_getaddrinfo(*args, **kwargs):
+        # Simulate resolving to a public IP (GitHub's IP range)
+        return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("140.82.113.4", 443))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", mock_getaddrinfo)
+
+    # Mock the HTTP HEAD request
+    class MockResponse:
+        status = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+    class MockSession:
+        def head(self, *args, **kwargs):
+            return MockResponse()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+    monkeypatch.setattr(aiohttp, "ClientSession", lambda: MockSession())
+
+    # Should accept valid public URL
+    assert await validate_git_location("https://github.com/org/repo") is True
+
+
+@pytest.mark.asyncio
+async def test_validate_git_location_rejects_on_http_error(monkeypatch):
+    import aiohttp
+
+    def mock_getaddrinfo(*args, **kwargs):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("140.82.113.4", 443))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", mock_getaddrinfo)
+
+    # Mock the HTTP HEAD request to return 404
+    class MockResponse:
+        status = 404
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+    class MockSession:
+        def head(self, *args, **kwargs):
+            return MockResponse()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+    monkeypatch.setattr(aiohttp, "ClientSession", lambda: MockSession())
+
+    # Should reject if URL returns non-200 status
+    assert await validate_git_location("https://github.com/org/nonexistent") is False
