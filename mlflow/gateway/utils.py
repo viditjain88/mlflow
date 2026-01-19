@@ -1,9 +1,12 @@
+import asyncio
 import base64
 import functools
+import ipaddress
 import json
 import logging
 import posixpath
 import re
+import socket
 from typing import Any, AsyncGenerator
 from urllib.parse import urlparse
 
@@ -264,39 +267,48 @@ def is_valid_ai21labs_model(model_name: str) -> bool:
 
 async def validate_git_location(url: str) -> bool:
     import aiohttp
-    import ipaddress
-    import socket
 
     parsed = urlparse(url)
     if parsed.scheme != "https":
         return False
 
+    hostname = parsed.hostname
+    if not hostname:
+        return False
+
+    # Block common localhost strings
+    if hostname.lower() in ("localhost", "0.0.0.0", "::1", "127.0.0.1"):
+        return False
+
     try:
-        # Resolve hostname to IP to check for private/local addresses (SSRF prevention)
-        hostname = parsed.hostname
-        if not hostname:
+        # Check if hostname is already an IP address
+        ip = ipaddress.ip_address(hostname)
+        if ip.is_private or ip.is_loopback or ip.is_link_local:
+            return False
+    except ValueError:
+        # It's a hostname, need to resolve it to check for private IPs
+        try:
+            # Run blocking DNS resolution in executor to keep it async
+            loop = asyncio.get_event_loop()
+            addr_info = await loop.run_in_executor(
+                None, socket.getaddrinfo, hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM
+            )
+
+            # Check all resolved IPs for private/local addresses
+            for family, _, _, _, sockaddr in addr_info:
+                ip_str = sockaddr[0]
+                try:
+                    ip = ipaddress.ip_address(ip_str)
+                    if ip.is_private or ip.is_loopback or ip.is_link_local:
+                        return False
+                except ValueError:
+                    # If we can't parse the IP, reject it as suspicious
+                    return False
+        except (socket.gaierror, OSError):
+            # DNS resolution failed
             return False
 
-        # Asynchronously resolve (rudimentary, for full async DNS resort to aiodns if needed,
-        # but getaddrinfo is generally acceptable for this level of check)
-        # Note: This is blocking. To make it truly async we should run in executor or use aiodns.
-        # For simplicity and given the task scope, we'll assume basic validation.
-        # However, to be strict about async, let's just check the string format first.
-        # Blocking getaddrinfo is a known trade-off without extra deps.
-        # Let's perform a basic check on common private IP strings if they are IPs.
-
-        try:
-             ip = ipaddress.ip_address(hostname)
-             if ip.is_private or ip.is_loopback:
-                 return False
-        except ValueError:
-            # It's a hostname, not an IP.
-            # Resolving it is complex without introducing blocking calls or new dependencies.
-            # We will rely on the fact that most git hosts are public.
-            # If explicit blocking of "localhost" string is desired:
-            if hostname in ("localhost", "0.0.0.0", "::1"):
-                return False
-
+    try:
         async with aiohttp.ClientSession() as session:
             async with session.head(url, allow_redirects=True, timeout=10) as response:
                 return response.status == 200
