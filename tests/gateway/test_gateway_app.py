@@ -277,24 +277,26 @@ def test_dynamic_route():
 
 def test_create_endpoint_success(tmp_path):
     config_path = tmp_path / "config.yaml"
-    config = GatewayConfig(
-        **{
-            "endpoints": [
-                {
-                    "name": "existing-endpoint",
-                    "endpoint_type": "llm/v1/chat",
-                    "model": {
-                        "name": "gpt-4",
-                        "provider": "openai",
-                        "config": {
-                            "openai_api_key": "test_key",
-                        },
+    config_dict = {
+        "endpoints": [
+            {
+                "name": "existing-endpoint",
+                "endpoint_type": "llm/v1/chat",
+                "model": {
+                    "name": "gpt-4",
+                    "provider": "openai",
+                    "config": {
+                        "openai_api_key": "test_key",
                     },
-                }
-            ],
-        }
-    )
-    config_path.write_text(config.model_dump_json())
+                },
+            }
+        ],
+    }
+    config = GatewayConfig(**config_dict)
+
+    import yaml
+
+    config_path.write_text(yaml.safe_dump(config_dict))
     app = create_app_from_config(config, config_path=str(config_path))
     client = TestClient(app)
 
@@ -447,24 +449,26 @@ def test_create_endpoint_missing_model_name():
 
 def test_create_endpoint_config_persistence(tmp_path):
     config_path = tmp_path / "config.yaml"
-    config = GatewayConfig(
-        **{
-            "endpoints": [
-                {
-                    "name": "existing-endpoint",
-                    "endpoint_type": "llm/v1/chat",
-                    "model": {
-                        "name": "gpt-4",
-                        "provider": "openai",
-                        "config": {
-                            "openai_api_key": "test_key",
-                        },
+    config_dict = {
+        "endpoints": [
+            {
+                "name": "existing-endpoint",
+                "endpoint_type": "llm/v1/chat",
+                "model": {
+                    "name": "gpt-4",
+                    "provider": "openai",
+                    "config": {
+                        "openai_api_key": "test_key",
                     },
-                }
-            ],
-        }
-    )
-    config_path.write_text(config.model_dump_json())
+                },
+            }
+        ],
+    }
+    config = GatewayConfig(**config_dict)
+
+    import yaml
+
+    config_path.write_text(yaml.safe_dump(config_dict))
     app = create_app_from_config(config, config_path=str(config_path))
     client = TestClient(app)
 
@@ -484,8 +488,6 @@ def test_create_endpoint_config_persistence(tmp_path):
     assert response.status_code == 200
 
     # Verify config file was updated
-    import yaml
-
     with open(config_path) as f:
         saved_config = yaml.safe_load(f)
 
