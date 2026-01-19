@@ -279,3 +279,230 @@ def test_create_app_from_env_fails_if_MLFLOW_GATEWAY_CONFIG_is_not_set(monkeypat
     monkeypatch.delenv("MLFLOW_GATEWAY_CONFIG", raising=False)
     with pytest.raises(MlflowException, match="'MLFLOW_GATEWAY_CONFIG' is not set"):
         create_app_from_env()
+
+
+@pytest.fixture
+def client_for_endpoint_creation(tmp_path) -> TestClient:
+    """Fixture for testing endpoint creation with a temporary config file."""
+
+    config = GatewayConfig(
+        **{
+            "endpoints": [
+                {
+                    "name": "existing-endpoint",
+                    "endpoint_type": "llm/v1/chat",
+                    "model": {
+                        "name": "gpt-4",
+                        "provider": "openai",
+                        "config": {
+                            "openai_api_key": "test-key",
+                        },
+                    },
+                }
+            ]
+        }
+    )
+    config_path = tmp_path / "test_config.yaml"
+    app = create_app_from_config(config, config_path=str(config_path))
+    return TestClient(app)
+
+
+def test_create_endpoint_success(client_for_endpoint_creation: TestClient):
+    from mlflow.deployments.server.constants import MLFLOW_DEPLOYMENTS_CRUD_ENDPOINT_BASE
+
+    endpoint_data = {
+        "name": "new-endpoint",
+        "endpoint_type": "llm/v1/chat",
+        "model": {
+            "name": "gpt-3.5-turbo",
+            "provider": "openai",
+            "config": {
+                "openai_api_key": "test-key",
+            },
+        },
+    }
+
+    response = client_for_endpoint_creation.post(
+        MLFLOW_DEPLOYMENTS_CRUD_ENDPOINT_BASE, json=endpoint_data
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["name"] == "new-endpoint"
+    assert result["endpoint_type"] == "llm/v1/chat"
+    assert result["model"]["name"] == "gpt-3.5-turbo"
+    assert result["model"]["provider"] == "openai"
+
+    # Verify the endpoint was added and can be retrieved
+    get_response = client_for_endpoint_creation.get(
+        f"{MLFLOW_DEPLOYMENTS_CRUD_ENDPOINT_BASE}new-endpoint"
+    )
+    assert get_response.status_code == 200
+    assert get_response.json()["name"] == "new-endpoint"
+
+
+def test_create_endpoint_duplicate_name_rejection(client_for_endpoint_creation: TestClient):
+    from mlflow.deployments.server.constants import MLFLOW_DEPLOYMENTS_CRUD_ENDPOINT_BASE
+
+    endpoint_data = {
+        "name": "existing-endpoint",  # This name already exists
+        "endpoint_type": "llm/v1/chat",
+        "model": {
+            "name": "gpt-3.5-turbo",
+            "provider": "openai",
+            "config": {
+                "openai_api_key": "test-key",
+            },
+        },
+    }
+
+    response = client_for_endpoint_creation.post(
+        MLFLOW_DEPLOYMENTS_CRUD_ENDPOINT_BASE, json=endpoint_data
+    )
+
+    assert response.status_code == 400
+    assert "already exists" in response.json()["detail"]
+    assert "existing-endpoint" in response.json()["detail"]
+
+
+def test_create_endpoint_invalid_git_location(client_for_endpoint_creation: TestClient):
+    from mlflow.deployments.server.constants import MLFLOW_DEPLOYMENTS_CRUD_ENDPOINT_BASE
+
+    async def mock_validate_false(url):
+        return False
+
+    endpoint_data = {
+        "name": "endpoint-with-git",
+        "endpoint_type": "llm/v1/chat",
+        "model": {
+            "name": "custom-model",
+            "provider": "openai",
+            "git_location": "https://invalid-git-url.com/model.git",
+            "config": {
+                "openai_api_key": "test-key",
+            },
+        },
+    }
+
+    # Mock validate_git_location to return False (invalid URL)
+    with mock.patch("mlflow.gateway.app.validate_git_location", side_effect=mock_validate_false):
+        response = client_for_endpoint_creation.post(
+            MLFLOW_DEPLOYMENTS_CRUD_ENDPOINT_BASE, json=endpoint_data
+        )
+
+    assert response.status_code == 400
+    assert "not a valid URL" in response.json()["detail"]
+    assert "https://invalid-git-url.com/model.git" in response.json()["detail"]
+
+
+def test_create_endpoint_missing_model_name(client_for_endpoint_creation: TestClient):
+    from mlflow.deployments.server.constants import MLFLOW_DEPLOYMENTS_CRUD_ENDPOINT_BASE
+
+    endpoint_data = {
+        "name": "endpoint-no-model-name",
+        "endpoint_type": "llm/v1/chat",
+        "model": {
+            "name": None,  # Missing model name
+            "provider": "openai",
+            "config": {
+                "openai_api_key": "test-key",
+            },
+        },
+    }
+
+    response = client_for_endpoint_creation.post(
+        MLFLOW_DEPLOYMENTS_CRUD_ENDPOINT_BASE, json=endpoint_data
+    )
+
+    assert response.status_code == 400
+    assert "The model name must be provided" in response.json()["detail"]
+
+
+def test_create_endpoint_config_persistence(tmp_path):
+    from mlflow.deployments.server.constants import MLFLOW_DEPLOYMENTS_CRUD_ENDPOINT_BASE
+    from mlflow.gateway.config import _load_gateway_config
+
+    config = GatewayConfig(
+        **{
+            "endpoints": [
+                {
+                    "name": "initial-endpoint",
+                    "endpoint_type": "llm/v1/chat",
+                    "model": {
+                        "name": "gpt-4",
+                        "provider": "openai",
+                        "config": {
+                            "openai_api_key": "test-key",
+                        },
+                    },
+                }
+            ]
+        }
+    )
+    config_path = tmp_path / "test_config.yaml"
+    app = create_app_from_config(config, config_path=str(config_path))
+    client = TestClient(app)
+
+    # Create a new endpoint
+    endpoint_data = {
+        "name": "new-persisted-endpoint",
+        "endpoint_type": "llm/v1/completions",
+        "model": {
+            "name": "gpt-3.5-turbo",
+            "provider": "openai",
+            "config": {
+                "openai_api_key": "test-key",
+            },
+        },
+    }
+
+    response = client.post(MLFLOW_DEPLOYMENTS_CRUD_ENDPOINT_BASE, json=endpoint_data)
+    assert response.status_code == 200
+
+    # Verify the config file was updated
+    assert config_path.exists()
+    loaded_config = _load_gateway_config(str(config_path))
+
+    # Should have both the initial endpoint and the new one
+    assert len(loaded_config.endpoints) == 2
+    endpoint_names = {ep.name for ep in loaded_config.endpoints}
+    assert "initial-endpoint" in endpoint_names
+    assert "new-persisted-endpoint" in endpoint_names
+
+    # Verify the new endpoint details
+    new_endpoint = next(ep for ep in loaded_config.endpoints if ep.name == "new-persisted-endpoint")
+    assert new_endpoint.endpoint_type == "llm/v1/completions"
+    assert new_endpoint.model.name == "gpt-3.5-turbo"
+    assert new_endpoint.model.provider == "openai"
+
+
+def test_create_endpoint_with_valid_git_location(client_for_endpoint_creation: TestClient):
+    from mlflow.deployments.server.constants import MLFLOW_DEPLOYMENTS_CRUD_ENDPOINT_BASE
+
+    async def mock_validate_true(url):
+        return True
+
+    endpoint_data = {
+        "name": "endpoint-with-valid-git",
+        "endpoint_type": "llm/v1/chat",
+        "model": {
+            "name": "custom-model",
+            "provider": "openai",
+            "git_location": "https://github.com/user/model.git",
+            "config": {
+                "openai_api_key": "test-key",
+            },
+        },
+    }
+
+    # Mock validate_git_location to return True (valid URL)
+    with mock.patch("mlflow.gateway.app.validate_git_location", side_effect=mock_validate_true):
+        response = client_for_endpoint_creation.post(
+            MLFLOW_DEPLOYMENTS_CRUD_ENDPOINT_BASE, json=endpoint_data
+        )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["name"] == "endpoint-with-valid-git"
+    assert result["model"]["name"] == "custom-model"
+    assert result["model"]["provider"] == "openai"
