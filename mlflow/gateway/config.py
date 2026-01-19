@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import pydantic
 import yaml
-from pydantic import ConfigDict, ValidationError, field_validator, model_validator
+from pydantic import ConfigDict, HttpUrl, ValidationError, field_validator, model_validator
 from pydantic.json import pydantic_encoder
 
 from mlflow.exceptions import MlflowException
@@ -325,6 +325,21 @@ class Model(ConfigModel):
     provider: str | Provider
     git_location: str | None = None
     config: SerializeAsAny[ConfigModel] | None = None
+
+    @field_validator("git_location", mode="before")
+    def validate_git_location_format(cls, value):
+        if value is None:
+            return value
+        # Validate that git_location is a well-formed HTTP/HTTPS URL
+        try:
+            # Use pydantic's HttpUrl to validate URL format
+            HttpUrl(value)
+        except (ValidationError, ValueError, TypeError):
+            raise MlflowException.invalid_parameter_value(
+                f"The git_location '{value}' is not a valid URL. "
+                "Please provide a valid HTTP or HTTPS URL."
+            )
+        return value
 
     @field_validator("provider", mode="before")
     def validate_provider(cls, value):
