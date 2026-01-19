@@ -397,6 +397,20 @@ def create_app_from_config(
                 detail="The model name must be provided.",
             )
 
+        # Persist configuration first before modifying in-memory state
+        # This ensures atomicity: if persistence fails, no partial state is left in memory
+        if app.config_path:
+            # Create a new config with the endpoint included
+            new_endpoints = list(app.dynamic_endpoints.values()) + [endpoint]
+            save_route_config(
+                GatewayConfig(
+                    endpoints=new_endpoints,
+                    routes=list(app.traffic_routes.values()),
+                ),
+                app.config_path,
+            )
+
+        # Only add to in-memory state after successful persistence
         app.dynamic_endpoints[endpoint.name] = endpoint
         app.add_api_route(
             path=(
@@ -411,14 +425,6 @@ def create_app_from_config(
             methods=["POST"],
             include_in_schema=False,
         )
-        if app.config_path:
-            save_route_config(
-                GatewayConfig(
-                    endpoints=list(app.dynamic_endpoints.values()),
-                    routes=list(app.traffic_routes.values()),
-                ),
-                app.config_path,
-            )
 
         return endpoint.to_endpoint()
 
