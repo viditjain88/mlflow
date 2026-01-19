@@ -263,6 +263,20 @@ def is_valid_ai21labs_model(model_name: str) -> bool:
 
 
 async def validate_git_location(url: str) -> bool:
+    """
+    Validate that a Git location URL is accessible and returns a successful response.
+
+    This function performs an async HTTP HEAD request to verify that the provided URL
+    is valid and accessible. It follows redirects and enforces a 10-second timeout to
+    prevent hanging on unresponsive endpoints.
+
+    Args:
+        url: The Git location URL to validate (e.g., a raw GitHub URL or Git repository URL).
+
+    Returns:
+        True if the URL responds with HTTP 200 status code, False otherwise (including
+        network errors, timeouts, or any other exceptions).
+    """
     import aiohttp
 
     try:
