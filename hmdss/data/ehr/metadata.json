@@ -1,0 +1,20 @@
+[
+  {
+    "patient_id": "P001",
+    "department": "Cardiology",
+    "status": "Critical",
+    "last_visit": "2023-10-01"
+  },
+  {
+    "patient_id": "P002",
+    "department": "Orthopedics",
+    "status": "Stable",
+    "last_visit": "2023-10-05"
+  },
+  {
+    "patient_id": "P003",
+    "department": "Neurology",
+    "status": "Observation",
+    "last_visit": "2023-09-20"
+  }
+]
